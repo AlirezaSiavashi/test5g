@@ -4,7 +4,9 @@ import logging
 import time
 import uuid
 from decimal import Decimal
-import math  # Used for generating a simple ECG-like waveform
+import math
+import socket
+import threading  # To handle multiple connections if needed
 
 from sdc11073.location import SdcLocation
 from sdc11073.loghelper import basic_logging_setup
@@ -21,6 +23,32 @@ from sdc11073.xml_types.dpws_types import ThisModelType
 # UUID setup
 base_uuid = uuid.UUID('{cc013678-79f6-403c-998f-3cc0cc050230}')
 my_uuid = uuid.uuid5(base_uuid, "12345")
+
+# TCP server setup for Wi-Fi communication
+HOST = '141.43.3.193'  # Your computer's IP address for the TCP server
+PORT = 65432           # Arbitrary port for sending ECG data
+
+clients = []  # List to hold connected clients
+
+def start_tcp_server():
+    """ Start the TCP server to send ECG data to clients. """
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((HOST, PORT))
+    server_socket.listen()
+    print(f"Server listening on {HOST}:{PORT}")
+
+    while True:
+        client_socket, client_address = server_socket.accept()
+        print(f"Connected by {client_address}")
+        clients.append(client_socket)
+
+def broadcast_data(data: str):
+    """ Send data to all connected clients. """
+    for client in clients[:]:
+        try:
+            client.sendall(data.encode())
+        except BrokenPipeError:
+            clients.remove(client)  # Remove client if the connection is broken
 
 def set_local_ensemble_context(mdib: ProviderMdib, ensemble_extension_string: str):
     descriptor_container = mdib.descriptions.NODETYPE.get_one(pm.EnsembleContextDescriptor)
@@ -43,6 +71,9 @@ def set_local_ensemble_context(mdib: ProviderMdib, ensemble_extension_string: st
 if __name__ == '__main__':
     # Logging setup
     basic_logging_setup(level=logging.INFO)
+
+    # Start the TCP server in a separate thread
+    threading.Thread(target=start_tcp_server, daemon=True).start()
 
     my_discovery = WSDiscoverySingleAdapter("Loopback Pseudo-Interface 1")
     my_discovery.start()
@@ -97,6 +128,11 @@ if __name__ == '__main__':
             for metric_descr in ecg_metric_descrs:
                 st = transaction_mgr.get_state(metric_descr.Handle)
                 st.MetricValue.Value = ecg_value
+        
+        # Convert ECG value to string and broadcast to clients
+        ecg_data = f"ECG Value: {ecg_value}\n"
+        broadcast_data(ecg_data)
+        
         print(f"Sent ECG value: {ecg_value}")
         
         # Delay to simulate real-time ECG sending
