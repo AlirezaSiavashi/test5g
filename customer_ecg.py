@@ -12,56 +12,58 @@ from sdc11073.consumer import SdcConsumer
 from sdc11073.mdib import ConsumerMdib
 from sdc11073 import observableproperties
 from sdc11073.loghelper import basic_logging_setup
+import socket
+import threading
 
-# The provider we connect to is known by its UUID
+# Provider UUID to connect
 baseUUID = uuid.UUID('{cc013678-79f6-403c-998f-3cc0cc050230}')
 device_A_UUID = uuid.uuid5(baseUUID, "12345")
 
-# Initialize lists to store time and metric values for plotting
+# Plotting setup
 times = []
 metric_values = []
-
-# Set up the plot
 fig, ax = plt.subplots()
 line, = ax.plot([], [], lw=2)
-ax.set_ylim(0, 100)  # Set Y-axis limits based on expected metric range
+ax.set_ylim(-1, 1)  # Adjust limits for expected ECG range
 ax.set_xlim(0, 10)  # Initial X-axis limit
 ax.set_title('Metric Value Over Time')
 ax.set_xlabel('Time (s)')
 ax.set_ylabel('Metric Value')
 
-# Function to initialize the plot
+# Initialize plot
 def init():
     line.set_data([], [])
     return line,
 
-# Function to update the plot
+# Update plot with new values
 def update_plot(frame):
     line.set_data(times, metric_values)
-    ax.set_xlim(max(0, frame - 10), frame)  # Slide the x-axis as time progresses
+    ax.relim()
+    ax.autoscale_view()  # Automatically adjust view to new data
+    ax.set_xlim(max(0, times[-1] - 10), times[-1])  # Slide x-axis as time progresses
     return line,
 
-# Callback function for metric updates from the provider
+# Callback for metric updates
 def on_metric_update(metrics_by_handle: dict):
-    # Extract metric values and time for visualization
     for handle, metric in metrics_by_handle.items():
-        metric_value = metric.metric_value
-        timestamp = time.time()
-        print(f"Got update on: {handle} with value: {metric_value}")
+        metric_value = metric.MetricValue.Value  # Access the correct attribute
+        timestamp = time.time() - start_time  # Time relative to start
 
-        # Append the timestamp and metric value for plotting
+        print(f"Got update on: {handle} with value: {metric_value}")
+        
         times.append(timestamp)
-        metric_values.append(metric_value)
+        metric_values.append(float(metric_value))  # Ensure numeric values for plotting
 
         # Limit the list length to keep the plot manageable
         if len(times) > 100:
             times.pop(0)
             metric_values.pop(0)
 
+# Ensemble context setup
 def set_ensemble_context(mdib: ConsumerMdib, sdc_consumer: SdcConsumer) -> None:
     # Attempt to set ensemble context on the device
     print("Trying to set ensemble context of device A")
-    ensemble_descriptor_container = mdib.descriptions.NODETYPE.getOne(pm.EnsembleContextDescriptor)
+    ensemble_descriptor_container = mdib.descriptions.NODETYPE.get_one(pm.EnsembleContextDescriptor)
     context_client = sdc_consumer.context_service_client
     operation_handle = None
     for op_descr in mdib.descriptions.NODETYPE.get(pm.SetContextStateOperationDescriptor, []):
@@ -80,18 +82,32 @@ def set_ensemble_context(mdib: ConsumerMdib, sdc_consumer: SdcConsumer) -> None:
     else:
         print('set ensemble context was successful.')
 
+# TCP Client for receiving additional data if required
+def start_tcp_client():
+    host, port = '127.0.0.1', 65432
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+        client_socket.connect((host, port))
+        print(f"Connected to TCP server at {host}:{port}")
+        while True:
+            data = client_socket.recv(1024).decode()
+            if data:
+                print(f"Received ECG data from provider: {data}")
+
 if __name__ == '__main__':
     basic_logging_setup(level=logging.INFO)
+    start_time = time.time()  # Set start time for relative timestamping
     my_discovery = WSDiscovery("127.0.0.1")
     my_discovery.start()
+    
+    # Start searching for SDC providers
     found_device = False
     while not found_device:
-        print('searching for SDC providers')
+        print('Searching for SDC providers...')
         services = my_discovery.search_services(types=SdcV1Definitions.MedicalDeviceTypesFilter)
         for one_service in services:
             print("Got service:", one_service.epr)
             if one_service.epr == device_A_UUID.urn:
-                print("Got a match:", one_service)
+                print("Match found:", one_service)
                 my_client = SdcConsumer.from_wsd_service(one_service, ssl_context_container=None)
                 my_client.start_all(not_subscribed_actions=periodic_actions)
                 my_mdib = ConsumerMdib(my_client)
@@ -100,8 +116,12 @@ if __name__ == '__main__':
                 found_device = True
                 set_ensemble_context(my_mdib, my_client)
 
+    # Start the TCP client in a separate thread if needed
+    tcp_client_thread = threading.Thread(target=start_tcp_client, daemon=True)
+    tcp_client_thread.start()
+
     # Run the plot animation
-    ani = animation.FuncAnimation(fig, update_plot, init_func=init, blit=True)
+    ani = animation.FuncAnimation(fig, update_plot, init_func=init, blit=True, interval=100)
     plt.show()
 
     # Keep the client running to get notified on metric changes
