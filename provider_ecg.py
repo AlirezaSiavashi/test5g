@@ -24,14 +24,14 @@ from sdc11073.xml_types.dpws_types import ThisModelType
 base_uuid = uuid.UUID('{cc013678-79f6-403c-998f-3cc0cc050230}')
 my_uuid = uuid.uuid5(base_uuid, "12345")
 
-# TCP server setup for Wi-Fi communication
-HOST = '141.43.3.193'  # Your computer's IP address for the TCP server
-PORT = 65432           # Arbitrary port for sending ECG data
+# TCP server setup for communication with consumer
+HOST = '127.0.0.1'  # Localhost for local machine communication
+PORT = 65432        # Port for sending ECG data
 
 clients = []  # List to hold connected clients
 
 def start_tcp_server():
-    """ Start the TCP server to send ECG data to clients. """
+    """Start the TCP server to send ECG data to clients."""
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((HOST, PORT))
     server_socket.listen()
@@ -43,11 +43,11 @@ def start_tcp_server():
         clients.append(client_socket)
 
 def broadcast_data(data: str):
-    """ Send data to all connected clients. """
-    for client in clients[:]:
+    """Send data to all connected clients."""
+    for client in clients[:]:  # Iterate over a copy of the list
         try:
-            client.sendall(data.encode())
-        except BrokenPipeError:
+            client.sendall(data.encode())  # Send data as bytes
+        except (BrokenPipeError, ConnectionResetError):
             clients.remove(client)  # Remove client if the connection is broken
 
 def set_local_ensemble_context(mdib: ProviderMdib, ensemble_extension_string: str):
@@ -75,11 +75,13 @@ if __name__ == '__main__':
     # Start the TCP server in a separate thread
     threading.Thread(target=start_tcp_server, daemon=True).start()
 
-    my_discovery = WSDiscoverySingleAdapter("Loopback Pseudo-Interface 1")
+    # WS-Discovery for local machine communication
+    my_discovery = WSDiscoverySingleAdapter("lo")
     my_discovery.start()
     my_mdib = ProviderMdib.from_mdib_file("mdib.xml")
     print("My UUID is {}".format(my_uuid))
 
+    # Device and Model setup
     my_location = SdcLocation(fac='HOSP', poc='CU2', bed='BedSim')
     dpws_model = ThisModelType(manufacturer='Draeger',
                                manufacturer_url='www.draeger.com',
@@ -103,7 +105,7 @@ if __name__ == '__main__':
     set_local_ensemble_context(my_mdib, "MyEnsemble")
     sdc_provider.set_location(my_location)
 
-    # Find or create the ECG metric
+    # Configure ECG metric descriptors and initial values
     ecg_metric_descrs = [c for c in my_mdib.descriptions.objects if c.NODETYPE == pm.NumericMetricDescriptor]
     with my_mdib.metric_state_transaction() as transaction_mgr:
         for metric_descr in ecg_metric_descrs:
@@ -112,15 +114,13 @@ if __name__ == '__main__':
             st.MetricValue.Validity = pm_types.MeasurementValidity.VALID
             st.ActivationState = pm_types.ComponentActivation.ON
 
-    # Simulate ECG wave values (e.g., sine wave for demonstration)
-    ecg_frequency = 1  # Frequency in Hertz for ECG simulation
-    ecg_amplitude = Decimal(1.0)  # Placeholder amplitude
+    # Simulate ECG wave values
+    ecg_frequency = 1  # Frequency in Hertz
+    ecg_amplitude = Decimal(1.0)  # Amplitude
 
-    # Infinite loop to send ECG data
     start_time = time.time()
     while True:
         elapsed_time = time.time() - start_time
-        # Generate a simulated ECG value based on a sine function
         ecg_value = Decimal(ecg_amplitude * Decimal(math.sin(2 * math.pi * ecg_frequency * elapsed_time)))
         
         # Update the ECG metric in the MDIB
@@ -135,5 +135,5 @@ if __name__ == '__main__':
         
         print(f"Sent ECG value: {ecg_value}")
         
-        # Delay to simulate real-time ECG sending
-        time.sleep(0.2)  # Adjust as needed for data frequency
+        # Delay to simulate real-time ECG data sending
+        time.sleep(0.2)
