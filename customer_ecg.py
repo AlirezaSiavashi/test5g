@@ -19,18 +19,16 @@ import threading
 baseUUID = uuid.UUID('{cc013678-79f6-403c-998f-3cc0cc050230}')
 device_A_UUID = uuid.uuid5(baseUUID, "12345")
 
-# Plotting setup
 times = []
 metric_values = []
 fig, ax = plt.subplots()
 line, = ax.plot([], [], lw=2)
 ax.set_ylim(-1, 1)  # Adjust limits for expected ECG range
 ax.set_xlim(0, 10)  # Initial X-axis limit
-ax.set_title('Metric Value Over Time')
+ax.set_title('electrocardiogram01')
 ax.set_xlabel('Time (s)')
 ax.set_ylabel('Metric Value')
 
-# Initialize plot
 def init():
     line.set_data([], [])
     return line,
@@ -46,8 +44,8 @@ def update_plot(frame):
 # Callback for metric updates
 def on_metric_update(metrics_by_handle: dict):
     for handle, metric in metrics_by_handle.items():
-        metric_value = metric.MetricValue.Value  # Access the correct attribute
-        timestamp = time.time() - start_time  # Time relative to start
+        metric_value = metric.MetricValue.Value  
+        timestamp = time.time() - start_time  
 
         print(f"Got update on: {handle} with value: {metric_value}")
         
