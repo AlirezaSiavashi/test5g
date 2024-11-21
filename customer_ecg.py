@@ -11,8 +11,8 @@ import socket
 import threading
 
 # Provider's IP address and port
-PROVIDER_HOST = '141.43.109.188'
-PORT = 65432
+PROVIDER_HOST = 'put your computer Ip'
+PORT = "open a port and replace"  
 
 # Initialize data for plotting
 times = []
