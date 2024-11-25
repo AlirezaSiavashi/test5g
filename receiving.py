@@ -1,9 +1,9 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import time
 import threading
 
 app = Flask(__name__)
@@ -37,32 +37,47 @@ def upload_ecg_data():
         return "Invalid data", 400
 
 def fetch_latest_data():
-    """Fetch the latest 1000 data points from the database."""
+    """Fetch the latest 200 data points (20 seconds of data at 10Hz sampling rate)."""
     with app.app_context():  # Push the Flask application context
-        ecg_data = ECGData.query.order_by(ECGData.timestamp.desc()).limit(1000).all()
+        ecg_data = ECGData.query.order_by(ECGData.timestamp.desc()).limit(200).all()
         adc_values = [entry.adc_value for entry in ecg_data][::-1]
         timestamps = [entry.timestamp for entry in ecg_data][::-1]
     return timestamps, adc_values
 
+def smooth_signal(data, window_size=10):
+    """Smooth the signal using a moving average."""
+    if len(data) < window_size:
+        return data
+    return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
+
 def live_plot():
     """Plot ECG data dynamically using Matplotlib."""
-    fig, ax = plt.subplots()
-    ax.set_title('ECG Signal')
-    ax.set_xlabel('Time')
-    ax.set_ylabel('ADC Value')
-    line, = ax.plot([], [], label='ECG Signal', color='blue')
-    ax.legend()
-    ax.grid(True)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.set_title('Live ECG Signal', fontsize=16)
+    ax.set_xlabel('Time (seconds)', fontsize=12)
+    ax.set_ylabel('ADC Value', fontsize=12)
+    line, = ax.plot([], [], label='ECG Signal', color='blue', linewidth=1)
+    ax.legend(fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.7)
 
     def update(frame):
         timestamps, adc_values = fetch_latest_data()
         if timestamps and adc_values:
-            line.set_data(range(len(adc_values)), adc_values)
+            # Convert timestamps to relative seconds
+            start_time = timestamps[0]
+            time_in_seconds = [(t - start_time).total_seconds() for t in timestamps]
+
+            # Smooth the data for clarity
+            smoothed_values = smooth_signal(adc_values, window_size=10)
+
+            # Update the plot
+            line.set_data(time_in_seconds[:len(smoothed_values)], smoothed_values)
             ax.relim()
             ax.autoscale_view()
         return line,
 
-    ani = animation.FuncAnimation(fig, update, interval=500, cache_frame_data=False)
+    ani = animation.FuncAnimation(fig, update, interval=100, cache_frame_data=False)  # Match update rate to 10Hz
+    plt.tight_layout()
     plt.show()
 
 if __name__ == '__main__':
