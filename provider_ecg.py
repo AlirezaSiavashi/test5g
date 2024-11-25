@@ -22,8 +22,8 @@ from sdc11073.xml_types.dpws_types import ThisModelType
 
 
 # Network configuration
-HOST = '141.43.109.188'  # Replace with Provider Machine's IP
-PORT = 65432             # Port for sending ECG data
+HOST = ''  # Replace with Provider Machine's IP
+PORT =             # Port for sending ECG data
 
 clients = []  # List to hold connected clients
 
