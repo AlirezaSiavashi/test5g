@@ -4,9 +4,10 @@ import logging
 import time
 import uuid
 from decimal import Decimal
-import math
 import socket
 import threading
+import sqlite3
+import os
 
 from sdc11073.location import SdcLocation
 from sdc11073.loghelper import basic_logging_setup
@@ -22,8 +23,9 @@ from sdc11073.xml_types.dpws_types import ThisModelType
 
 
 # Network configuration
-HOST = '141.43.109.188'  # Replace with Provider Machine's IP
+HOST = '192.168.3.215'  # Replace with Provider Machine's IP
 PORT = 65432             # Port for sending ECG data
+DB_PATH = os.path.join("instance", "ecg_data.db")  # Path to the SQLite database in the 'instance' folder
 
 clients = []  # List to hold connected clients
 
@@ -46,6 +48,28 @@ def broadcast_data(data: str):
             client.sendall(data.encode())
         except (BrokenPipeError, ConnectionResetError):
             clients.remove(client)
+
+def get_latest_ecg_data():
+    """
+    Fetch the latest ECG value from the database.
+    Returns None if no data is available.
+    """
+    try:
+        connection = sqlite3.connect(DB_PATH)
+        cursor = connection.cursor()
+        # Corrected table name to match your schema
+        cursor.execute("SELECT adc_value FROM ecg_data ORDER BY timestamp DESC LIMIT 1;")
+        result = cursor.fetchone()
+        if result:
+            return Decimal(result[0]) / Decimal(1000)  # Scale the value if needed
+        else:
+            print("No ECG data available in the database.")
+            return None
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        return None
+    finally:
+        connection.close()
 
 def set_local_ensemble_context(mdib: ProviderMdib, ensemble_extension_string: str):
     """
@@ -75,7 +99,7 @@ if __name__ == '__main__':
     threading.Thread(target=start_tcp_server, daemon=True).start()
 
     # Setup SDC Provider
-    my_discovery = WSDiscoverySingleAdapter("wlp0s20f3")  # Replace with your network adapter
+    my_discovery = WSDiscoverySingleAdapter("wlan0")  # Replace with your network adapter
     my_discovery.start()
 
     my_mdib = ProviderMdib.from_mdib_file("mdib.xml")
@@ -105,33 +129,33 @@ if __name__ == '__main__':
     # Set local ensemble context
     set_local_ensemble_context(my_mdib, "TestExtensionString")
 
-    ecg_frequency = 1  # Hertz
-    ecg_amplitude = Decimal(1.0)
-
-    start_time = time.time()
     while True:
-        elapsed_time = time.time() - start_time
-        ecg_value = Decimal(ecg_amplitude * Decimal(math.sin(2 * math.pi * ecg_frequency * elapsed_time)))
+        # Fetch the latest ECG value from the database
+        ecg_value = get_latest_ecg_data()
 
-        # Update ECG Metric in MDIB
-        with my_mdib.metric_state_transaction() as transaction_mgr:
-            for metric_descr in my_mdib.descriptions.NODETYPE.get(pm.NumericMetricDescriptor, []):
-                st = transaction_mgr.get_state(metric_descr.Handle)
-                if st is None:
-                    print(f"No state found for descriptor handle: {metric_descr.Handle}")
-                    continue
+        if ecg_value is not None:
+            # Update ECG Metric in MDIB
+            with my_mdib.metric_state_transaction() as transaction_mgr:
+                for metric_descr in my_mdib.descriptions.NODETYPE.get(pm.NumericMetricDescriptor, []):
+                    st = transaction_mgr.get_state(metric_descr.Handle)
+                    if st is None:
+                        print(f"No state found for descriptor handle: {metric_descr.Handle}")
+                        continue
 
-                # Check and initialize MetricValue if not set
-                if st.MetricValue is None:
-                    print(f"Initializing MetricValue for {metric_descr.Handle}")
-                    st.mk_metric_value()
-                    st.MetricValue.Validity = pm_types.MeasurementValidity.VALID
+                    # Check and initialize MetricValue if not set
+                    if st.MetricValue is None:
+                        print(f"Initializing MetricValue for {metric_descr.Handle}")
+                        st.mk_metric_value()
+                        st.MetricValue.Validity = pm_types.MeasurementValidity.VALID
 
-                # Set the ECG value
-                st.MetricValue.Value = ecg_value
+                    # Set the ECG value
+                    st.MetricValue.Value = ecg_value
 
-        # Broadcast ECG data to clients
-        ecg_data = f"ECG Value: {ecg_value}\n"
-        broadcast_data(ecg_data)
-        print(f"Sent ECG value: {ecg_value}")
+            # Broadcast ECG data to clients
+            ecg_data = f"ECG Value: {ecg_value}\n"
+            broadcast_data(ecg_data)
+            print(f"Sent ECG value: {ecg_value}")
+        else:
+            print("Skipping ECG update as no data was retrieved.")
+
         time.sleep(0.2)
