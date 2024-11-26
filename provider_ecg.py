@@ -23,7 +23,7 @@ from sdc11073.xml_types.dpws_types import ThisModelType
 
 
 # Network configuration
-HOST = '192.168.3.215'  # Replace with Provider Machine's IP
+HOST = ''  # Replace with Provider Machine's IP
 PORT = 65432             # Port for sending ECG data
 DB_PATH = os.path.join("instance", "ecg_data.db")  # Path to the SQLite database in the 'instance' folder
 
